@@ -1,0 +1,7 @@
+streamlit
+pandas
+pymavlink
+matplotlib
+folium
+streamlit-folium
+openai
