@@ -15,6 +15,17 @@ plt.rcParams['axes.unicode_minus'] = False
 
 # 1. Page layout & header
 st.set_page_config(page_title="Ardupilot Log Analyzer", layout="wide")
+
+# Hide Streamlit default UI elements
+st.markdown("""
+    <style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    .stDeployButton {display:none;}
+    header {visibility: hidden;}
+    </style>
+    """, unsafe_allow_html=True)
+
 st.title("🚁 AI‑based Ardupilot Log Analyzer")
 st.write("Upload an Ardupilot log file (.bin) to inspect basic info and vibration data.")
 
