@@ -18,72 +18,187 @@ st.set_page_config(page_title="Ardupilot Log Analyzer", layout="wide")
 st.title("🚁 AI‑based Ardupilot Log Analyzer")
 st.write("Upload an Ardupilot log file (.bin) to inspect basic info and vibration data.")
 
-# Load OpenAI API key from secrets
-try:
-    api_key = st.secrets["OPENAI_API_KEY"]
-    model_choice = "gpt-4o-mini"  # Cost-effective model
-except (KeyError, FileNotFoundError):
-    api_key = None
-    model_choice = None
+# Pro license state
+if "is_pro" not in st.session_state:
+    st.session_state.is_pro = False
 
+# Sidebar: Pro license login
+with st.sidebar:
+    st.header("🔑 Pro 라이선스 키 입력")
+    pro_key = st.text_input(
+        "Pro License Key",
+        type="password",
+        help="Enter your Pro license key to unlock advanced features.",
+    )
 
-def generate_log_summary(data):
-    """
-    Generate a summary of analyzed log data for context injection into AI prompts.
-    """
-    summary_parts = []
-    
-    summary_parts.append(f"Log file analyzed: {data['message_count']:,} messages parsed, {len(data['message_types'])} message types found.")
-    
-    if data.get('has_parm') or data.get('has_msg'):
-        summary_parts.append("Log contains PARM/MSG records (typical Ardupilot DataFlash format).")
-    
-    # Vibration data summary
-    if data.get('df_vibe') is not None and len(data['df_vibe']) > 0:
-        df_vibe = data['df_vibe']
-        vibe_x_mean = df_vibe['x'].mean()
-        vibe_y_mean = df_vibe['y'].mean()
-        vibe_z_mean = df_vibe['z'].mean()
-        vibe_x_max = df_vibe['x'].max()
-        vibe_y_max = df_vibe['y'].max()
-        vibe_z_max = df_vibe['z'].max()
-        summary_parts.append(
-            f"Vibration data: X-axis avg={vibe_x_mean:.2f} (max={vibe_x_max:.2f}), "
-            f"Y-axis avg={vibe_y_mean:.2f} (max={vibe_y_max:.2f}), "
-            f"Z-axis avg={vibe_z_mean:.2f} (max={vibe_z_max:.2f})."
+    pro_password = st.secrets.get("PRO_PASSWORD", None)
+    if pro_key and pro_password and pro_key == pro_password:
+        st.session_state.is_pro = True
+        st.success("✅ Pro 기능이 활성화되었습니다!")
+    else:
+        st.session_state.is_pro = False
+        st.info("🔒 고급 기능이 잠겨있습니다.")
+        st.link_button(
+            "🚀 Pro 버전 평생 소장하기 ($19)",
+            "여기에_아까_복사한_링크_붙여넣기",
         )
-    
-    # Battery data summary
-    if data.get('df_bat') is not None and len(data['df_bat']) > 0:
-        df_bat = data['df_bat']
-        min_volt = df_bat['volt'].min()
-        max_volt = df_bat['volt'].max()
-        avg_volt = df_bat['volt'].mean()
-        max_curr = df_bat['curr'].max()
-        avg_curr = df_bat['curr'].mean()
-        summary_parts.append(
-            f"Battery data: Voltage range {min_volt:.2f}V - {max_volt:.2f}V (avg={avg_volt:.2f}V), "
-            f"Current max={max_curr:.2f}A (avg={avg_curr:.2f}A)."
-        )
-    
-    # GPS track summary
-    if data.get('gps_points') and len(data['gps_points']) >= 2:
-        gps_count = len(data['gps_points'])
-        summary_parts.append(f"GPS track: {gps_count} waypoints recorded.")
-    
-    return " ".join(summary_parts)
+
+def generate_log_summary(file_path: str) -> str:
+    """
+    Parse the log with pymavlink and return a concise summary string
+    for AI context injection.
+    """
+    from pymavlink import mavutil
+
+    # ATT (attitude)
+    att_roll_errors = []
+    att_pitch_errors = []
+
+    # GPS (precision)
+    nsats_min = None
+    hdop_max = None
+
+    # ERR / EV
+    err_messages = []
+    ev_messages = []
+
+    # CTUN (throttle out)
+    ctnu_tho_values = []
+
+    # VIBE
+    vibe_x_vals = []
+    vibe_y_vals = []
+    vibe_z_vals = []
+
+    # BAT
+    bat_voltages = []
+
+    master = mavutil.mavlink_connection(file_path)
+    consecutive_none = 0
+
+    while True:
+        msg = master.recv_match(blocking=False)
+        if msg is None:
+            consecutive_none += 1
+            if consecutive_none >= 500:
+                break
+            continue
+
+        consecutive_none = 0
+        mtype = msg.get_type()
+
+        # ATT: Roll/Pitch errors
+        if mtype == "ATT":
+            des_roll = getattr(msg, "DesRoll", getattr(msg, "desroll", None))
+            roll = getattr(msg, "Roll", getattr(msg, "roll", None))
+            des_pitch = getattr(msg, "DesPitch", getattr(msg, "despitch", None))
+            pitch = getattr(msg, "Pitch", getattr(msg, "pitch", None))
+            if des_roll is not None and roll is not None:
+                att_roll_errors.append(abs(float(des_roll) - float(roll)))
+            if des_pitch is not None and pitch is not None:
+                att_pitch_errors.append(abs(float(des_pitch) - float(pitch)))
+
+        # GPS: NSats min, HDOP max
+        if mtype in ("GPS", "GPS2", "GPS_RAW", "GPS_RAW_INT", "GPS2_RAW"):
+            nsats = getattr(msg, "NSats", getattr(msg, "nsats", None))
+            hdop = getattr(msg, "HDop", getattr(msg, "HDOP", getattr(msg, "hdop", None)))
+            if nsats is not None:
+                nsats = int(nsats)
+                nsats_min = nsats if nsats_min is None else min(nsats_min, nsats)
+            if hdop is not None:
+                hdop = float(hdop)
+                hdop_max = hdop if hdop_max is None else max(hdop_max, hdop)
+
+        # ERR / EV messages (limit later)
+        if mtype == "ERR":
+            err_messages.append(str(msg))
+        elif mtype == "EV":
+            ev_messages.append(str(msg))
+
+        # CTUN: ThO
+        if mtype == "CTUN":
+            tho = getattr(msg, "ThO", getattr(msg, "tho", getattr(msg, "THO", None)))
+            if tho is not None:
+                ctnu_tho_values.append(float(tho))
+
+        # VIBE: VibeX/Y/Z
+        if mtype == "VIBE":
+            vx = getattr(msg, "VibeX", getattr(msg, "vibe_x", None))
+            vy = getattr(msg, "VibeY", getattr(msg, "vibe_y", None))
+            vz = getattr(msg, "VibeZ", getattr(msg, "vibe_z", None))
+            if vx is not None:
+                vibe_x_vals.append(float(vx))
+            if vy is not None:
+                vibe_y_vals.append(float(vy))
+            if vz is not None:
+                vibe_z_vals.append(float(vz))
+
+        # BAT: Volt
+        if mtype == "BAT":
+            volt = getattr(msg, "Volt", getattr(msg, "volt", getattr(msg, "V", None)))
+            if volt is not None:
+                bat_voltages.append(float(volt))
+
+    # Build summary text
+    parts = []
+
+    # ATT summary
+    if att_roll_errors:
+        roll_err_mean = sum(att_roll_errors) / len(att_roll_errors)
+        parts.append(f"ATT: DesRoll-Roll 평균 오차={roll_err_mean:.3f}")
+    if att_pitch_errors:
+        pitch_err_mean = sum(att_pitch_errors) / len(att_pitch_errors)
+        parts.append(f"ATT: DesPitch-Pitch 평균 오차={pitch_err_mean:.3f}")
+
+    # GPS summary
+    if nsats_min is not None:
+        parts.append(f"GPS: NSats 최소={nsats_min}")
+    if hdop_max is not None:
+        parts.append(f"GPS: HDOP 최대={hdop_max:.2f}")
+
+    # ERR / EV (limit 10 each)
+    if err_messages:
+        err_list = err_messages[:10]
+        parts.append(f"ERR 메시지({len(err_messages)}개 중 10개): " + " | ".join(err_list))
+    if ev_messages:
+        ev_list = ev_messages[:10]
+        parts.append(f"EV 메시지({len(ev_messages)}개 중 10개): " + " | ".join(ev_list))
+
+    # CTUN summary
+    if ctnu_tho_values:
+        tho_avg = sum(ctnu_tho_values) / len(ctnu_tho_values)
+        tho_max = max(ctnu_tho_values)
+        parts.append(f"CTUN: ThO 평균={tho_avg:.2f}, 최대={tho_max:.2f}")
+
+    # VIBE summary
+    if vibe_x_vals:
+        parts.append(f"VIBE: VibeX 평균={sum(vibe_x_vals)/len(vibe_x_vals):.2f}, 최대={max(vibe_x_vals):.2f}")
+    if vibe_y_vals:
+        parts.append(f"VIBE: VibeY 평균={sum(vibe_y_vals)/len(vibe_y_vals):.2f}, 최대={max(vibe_y_vals):.2f}")
+    if vibe_z_vals:
+        parts.append(f"VIBE: VibeZ 평균={sum(vibe_z_vals)/len(vibe_z_vals):.2f}, 최대={max(vibe_z_vals):.2f}")
+
+    # BAT summary
+    if bat_voltages:
+        start_volt = bat_voltages[0]
+        min_volt = min(bat_voltages)
+        parts.append(f"BAT: 시작 전압={start_volt:.2f}V, 최저 전압={min_volt:.2f}V")
+
+    if not parts:
+        return "로그에서 요약 가능한 데이터를 찾지 못했습니다."
+
+    return " | ".join(parts)
 
 
-def call_openai_api(messages, api_key, model="gpt-4o"):
+def call_openai_api(messages, api_key):
     """
     Call OpenAI API with the conversation messages.
     """
     try:
         client = OpenAI(api_key=api_key)
         response = client.chat.completions.create(
-            model=model,
+            model="gpt-5-mini",
             messages=messages,
-            temperature=0.7,
         )
         return response.choices[0].message.content
     except Exception as e:
@@ -119,6 +234,8 @@ def analyze_log_file(file_bytes: bytes):
         message_count = 0
         has_parm = False
         has_msg = False
+        err_messages = []
+        ev_messages = []
         
         consecutive_none_count = 0
         max_consecutive_none = 500
@@ -156,6 +273,12 @@ def analyze_log_file(file_bytes: bytes):
                     has_parm = True
                 elif msg_type == "MSG":
                     has_msg = True
+                elif msg_type == "ERR":
+                    if len(err_messages) < 50:
+                        err_messages.append(str(msg))
+                elif msg_type == "EV":
+                    if len(ev_messages) < 50:
+                        ev_messages.append(str(msg))
         
         master.close()
         
@@ -295,6 +418,9 @@ def analyze_log_file(file_bytes: bytes):
             else:
                 df_bat['time_normalized'] = range(len(df_bat))
         
+        # Generate AI log summary (context injection)
+        log_summary = generate_log_summary(file_path)
+        
         return {
             'file_size': file_size,
             'first_bytes': first_bytes,
@@ -305,6 +431,9 @@ def analyze_log_file(file_bytes: bytes):
             'gps_points': gps_points,
             'df_vibe': df_vibe,
             'df_bat': df_bat,
+            'log_summary': log_summary,
+            'err_messages': err_messages,
+            'ev_messages': ev_messages,
         }
     
     finally:
@@ -337,6 +466,8 @@ if uploaded_file is not None:
     gps_points = data['gps_points']
     df_vibe = data['df_vibe']
     df_bat = data['df_bat']
+    err_messages = data.get('err_messages', [])
+    ev_messages = data.get('ev_messages', [])
     
     # Display file info
     st.write(f"**File size:** {file_size:,} bytes ({file_size / 1024:.2f} KB)")
@@ -370,47 +501,67 @@ if uploaded_file is not None:
     elif message_count > 0:
         st.warning("No PARM or MSG records were found. The file may still be valid, but this is less common.")
     
-    # GPS track: draw flight path on a map using folium
+    # GPS track: draw flight path on a map using folium (Pro only)
     st.write("---")
     st.subheader("🗺️ Flight path (GPS)")
     
-    if len(gps_points) >= 2:
-        start_lat, start_lon = gps_points[0]
-        end_lat, end_lon = gps_points[-1]
-        
-        # Use Esri World Imagery (satellite) tiles and allow deep zoom
-        fmap = folium.Map(
-            location=[start_lat, start_lon],
-            zoom_start=16,
-            tiles=None,
-            max_zoom=20,
-        )
-        folium.TileLayer(
-            tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-            attr="Esri World Imagery",
-            name="Esri World Imagery",
-            max_zoom=20,
-        ).add_to(fmap)
+    if st.session_state.is_pro:
+        if len(gps_points) >= 2:
+            start_lat, start_lon = gps_points[0]
+            end_lat, end_lon = gps_points[-1]
+            
+            # Use Esri World Imagery (satellite) tiles and allow deep zoom
+            fmap = folium.Map(
+                location=[start_lat, start_lon],
+                zoom_start=16,
+                tiles=None,
+                max_zoom=20,
+            )
+            folium.TileLayer(
+                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                attr="Esri World Imagery",
+                name="Esri World Imagery",
+                max_zoom=20,
+            ).add_to(fmap)
 
-        # Draw flight path
-        folium.PolyLine(gps_points, color="red", weight=3, opacity=0.8).add_to(fmap)
-        folium.Marker(
-            location=[start_lat, start_lon],
-            tooltip="Start",
-            icon=folium.Icon(color="green", icon="play", prefix="fa"),
-        ).add_to(fmap)
-        folium.Marker(
-            location=[end_lat, end_lon],
-            tooltip="End",
-            icon=folium.Icon(color="red", icon="flag", prefix="fa"),
-        ).add_to(fmap)
+            # Draw flight path
+            folium.PolyLine(gps_points, color="red", weight=3, opacity=0.8).add_to(fmap)
+            folium.Marker(
+                location=[start_lat, start_lon],
+                tooltip="Start",
+                icon=folium.Icon(color="green", icon="play", prefix="fa"),
+            ).add_to(fmap)
+            folium.Marker(
+                location=[end_lat, end_lon],
+                tooltip="End",
+                icon=folium.Icon(color="red", icon="flag", prefix="fa"),
+            ).add_to(fmap)
 
-        # Automatically fit map bounds to the whole flight path
-        fmap.fit_bounds(gps_points)
-        
-        st_folium(fmap, key="flight_map", width="100%", height=500)
+            # Automatically fit map bounds to the whole flight path
+            fmap.fit_bounds(gps_points)
+            
+            st_folium(fmap, key="flight_map", width="100%", height=500)
+        else:
+            st.info("No usable GPS track could be extracted from this log.")
     else:
-        st.info("No usable GPS track could be extracted from this log.")
+        st.info("🔒 이 기능은 Pro 버전 전용입니다.")
+
+    # Error & Event analysis (Pro only)
+    st.write("---")
+    st.subheader("🧯 Error & Event analysis")
+    if st.session_state.is_pro:
+        if err_messages or ev_messages:
+            rows = []
+            for msg in err_messages:
+                rows.append({"Type": "ERR", "Message": msg})
+            for msg in ev_messages:
+                rows.append({"Type": "EV", "Message": msg})
+            df_errors = pd.DataFrame(rows)
+            st.dataframe(df_errors, use_container_width=True)
+        else:
+            st.info("No ERR/EV records found in this log.")
+    else:
+        st.info("🔒 이 기능은 Pro 버전 전용입니다.")
 
     # Battery analysis (BAT)
     if df_bat is not None and len(df_bat) > 0:
@@ -519,76 +670,70 @@ if uploaded_file is not None:
     # Store analyzed data in session state for chatbot access
     st.session_state.analyzed_data = data
 
-# AI Chatbot section (always visible, even without file upload)
+# AI Chatbot section (Pro only)
 st.write("---")
 st.subheader("🤖 AI Drone Consultation Chatbot")
 
-# Initialize chat history in session state
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-# Check if API key is available from secrets
-if not api_key:
-    st.error("⚠️ API 키 설정 오류: 관리자에게 문의하세요.")
+if not st.session_state.is_pro:
+    st.info("🔒 이 기능은 Pro 버전 전용입니다.")
 else:
-    # Generate log summary for context injection (if data exists)
-    if "analyzed_data" in st.session_state:
-        log_summary = generate_log_summary(st.session_state.analyzed_data)
-        system_prompt = f"""You are an expert drone flight log analyst and consultant. Your role is to help users understand their Ardupilot log data and provide actionable advice.
+    # Initialize chat history in session state
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
 
-Current log analysis results:
+    # Check if API key is available via Streamlit secrets
+    try:
+        api_key = st.secrets["OPENAI_API_KEY"]
+    except Exception:
+        api_key = None
+
+    if not api_key:
+        st.error("관리자에게 문의하세요(API 키 설정 오류)")
+    else:
+        # Generate log summary for context injection (if data exists)
+        if "analyzed_data" in st.session_state:
+            log_summary = st.session_state.analyzed_data.get("log_summary", "")
+            system_prompt = f"""너는 Ardupilot 로그 분석 전문가야. 다음은 이 비행의 핵심 데이터 요약본이야:
 {log_summary}
 
-Provide clear, technical, and helpful responses about:
-- Flight log interpretation
-- Potential issues or anomalies detected
-- Recommendations for drone maintenance or flight improvements
-- Explanation of technical metrics (vibration, battery, GPS, etc.)
+이 요약을 바탕으로 사용자의 질문에 답해줘. 로그에 직접 포함되지 않은 내용에 대해서는 일반적인 드론 운용/정비/분석 지식을 바탕으로 설명하되, 추측임을 명확히 밝혀줘."""
+        else:
+            system_prompt = """너는 Ardupilot 로그 분석 전문가야.
 
-Answer in a professional but friendly manner. If the user asks about something not in the log data, acknowledge it and provide general guidance."""
-    else:
-        system_prompt = """You are an expert drone flight log analyst and consultant. Your role is to help users understand Ardupilot log data and provide actionable advice.
+아직 로그 파일이 업로드되지 않았거나 처리 중이야. 일반적인 드론 로그 분석 방법, 흔한 이상 징후, 진동/배터리/GPS 해석 방법, 정비 베스트 프랙티스 등을 안내해줘."""
 
-The user has not uploaded a log file yet, or the file is being processed. You can still provide general guidance about:
-- Ardupilot log analysis
-- Common issues in drone flight logs
-- How to interpret various metrics (vibration, battery, GPS, etc.)
-- Best practices for drone maintenance
-
-Answer in a professional but friendly manner."""
-
-    # Display chat history
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-    
-    # Chat input
-    if prompt := st.chat_input("Ask me about your drone log data..."):
-        # Add user message to chat history
-        st.session_state.messages.append({"role": "user", "content": prompt})
+        # Display chat history
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
         
-        # Display user message
-        with st.chat_message("user"):
-            st.markdown(prompt)
+        # Chat input
+        if prompt := st.chat_input("Ask me about your drone log data..."):
+            # Add user message to chat history
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            
+            # Display user message
+            with st.chat_message("user"):
+                st.markdown(prompt)
+            
+            # Prepare messages for API call (system + conversation history)
+            api_messages = [
+                {"role": "system", "content": system_prompt}
+            ]
+            # Add conversation history (last 10 messages to avoid token limit)
+            for msg in st.session_state.messages[-10:]:
+                api_messages.append({"role": msg["role"], "content": msg["content"]})
+            
+            # Get AI response
+            with st.chat_message("assistant"):
+                with st.spinner("Thinking..."):
+                    response = call_openai_api(api_messages, api_key)
+                    st.markdown(response)
+            
+            # Add assistant response to chat history
+            st.session_state.messages.append({"role": "assistant", "content": response})
         
-        # Prepare messages for API call (system + conversation history)
-        api_messages = [
-            {"role": "system", "content": system_prompt}
-        ]
-        # Add conversation history (last 10 messages to avoid token limit)
-        for msg in st.session_state.messages[-10:]:
-            api_messages.append({"role": msg["role"], "content": msg["content"]})
-        
-        # Get AI response
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                response = call_openai_api(api_messages, api_key, model_choice)
-                st.markdown(response)
-        
-        # Add assistant response to chat history
-        st.session_state.messages.append({"role": "assistant", "content": response})
-    
-    # Clear chat button
-    if st.button("🗑️ Clear Chat History"):
-        st.session_state.messages = []
-        st.rerun()
+        # Clear chat button
+        if st.button("🗑️ Clear Chat History"):
+            st.session_state.messages = []
+            st.rerun()
