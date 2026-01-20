@@ -24,7 +24,7 @@ if "is_pro" not in st.session_state:
 
 # Sidebar: Pro license login
 with st.sidebar:
-    st.header("🔑 Pro 라이선스 키 입력")
+    st.header("🔑 Pro License Key")
     pro_key = st.text_input(
         "Pro License Key",
         type="password",
@@ -34,13 +34,13 @@ with st.sidebar:
     pro_password = st.secrets.get("PRO_PASSWORD", None)
     if pro_key and pro_password and pro_key == pro_password:
         st.session_state.is_pro = True
-        st.success("✅ Pro 기능이 활성화되었습니다!")
+        st.success("✅ Pro features unlocked!")
     else:
         st.session_state.is_pro = False
-        st.info("🔒 고급 기능이 잠겨있습니다.")
+        st.info("🔒 Advanced features are locked.")
         st.link_button(
-            "🚀 Pro 버전 평생 소장하기 ($19)",
-            "여기에_아까_복사한_링크_붙여넣기",
+            "🚀 Get Lifetime Access ($9)",
+            "https://scownu.gumroad.com/l/fdyrdb",
         )
 
 def generate_log_summary(file_path: str) -> str:
@@ -145,47 +145,47 @@ def generate_log_summary(file_path: str) -> str:
     # ATT summary
     if att_roll_errors:
         roll_err_mean = sum(att_roll_errors) / len(att_roll_errors)
-        parts.append(f"ATT: DesRoll-Roll 평균 오차={roll_err_mean:.3f}")
+        parts.append(f"ATT: DesRoll-Roll mean error={roll_err_mean:.3f}")
     if att_pitch_errors:
         pitch_err_mean = sum(att_pitch_errors) / len(att_pitch_errors)
-        parts.append(f"ATT: DesPitch-Pitch 평균 오차={pitch_err_mean:.3f}")
+        parts.append(f"ATT: DesPitch-Pitch mean error={pitch_err_mean:.3f}")
 
     # GPS summary
     if nsats_min is not None:
-        parts.append(f"GPS: NSats 최소={nsats_min}")
+        parts.append(f"GPS: NSats min={nsats_min}")
     if hdop_max is not None:
-        parts.append(f"GPS: HDOP 최대={hdop_max:.2f}")
+        parts.append(f"GPS: HDOP max={hdop_max:.2f}")
 
     # ERR / EV (limit 10 each)
     if err_messages:
         err_list = err_messages[:10]
-        parts.append(f"ERR 메시지({len(err_messages)}개 중 10개): " + " | ".join(err_list))
+        parts.append(f"ERR messages (10 of {len(err_messages)}): " + " | ".join(err_list))
     if ev_messages:
         ev_list = ev_messages[:10]
-        parts.append(f"EV 메시지({len(ev_messages)}개 중 10개): " + " | ".join(ev_list))
+        parts.append(f"EV messages (10 of {len(ev_messages)}): " + " | ".join(ev_list))
 
     # CTUN summary
     if ctnu_tho_values:
         tho_avg = sum(ctnu_tho_values) / len(ctnu_tho_values)
         tho_max = max(ctnu_tho_values)
-        parts.append(f"CTUN: ThO 평균={tho_avg:.2f}, 최대={tho_max:.2f}")
+        parts.append(f"CTUN: ThO mean={tho_avg:.2f}, max={tho_max:.2f}")
 
     # VIBE summary
     if vibe_x_vals:
-        parts.append(f"VIBE: VibeX 평균={sum(vibe_x_vals)/len(vibe_x_vals):.2f}, 최대={max(vibe_x_vals):.2f}")
+        parts.append(f"VIBE: VibeX mean={sum(vibe_x_vals)/len(vibe_x_vals):.2f}, max={max(vibe_x_vals):.2f}")
     if vibe_y_vals:
-        parts.append(f"VIBE: VibeY 평균={sum(vibe_y_vals)/len(vibe_y_vals):.2f}, 최대={max(vibe_y_vals):.2f}")
+        parts.append(f"VIBE: VibeY mean={sum(vibe_y_vals)/len(vibe_y_vals):.2f}, max={max(vibe_y_vals):.2f}")
     if vibe_z_vals:
-        parts.append(f"VIBE: VibeZ 평균={sum(vibe_z_vals)/len(vibe_z_vals):.2f}, 최대={max(vibe_z_vals):.2f}")
+        parts.append(f"VIBE: VibeZ mean={sum(vibe_z_vals)/len(vibe_z_vals):.2f}, max={max(vibe_z_vals):.2f}")
 
     # BAT summary
     if bat_voltages:
         start_volt = bat_voltages[0]
         min_volt = min(bat_voltages)
-        parts.append(f"BAT: 시작 전압={start_volt:.2f}V, 최저 전압={min_volt:.2f}V")
+        parts.append(f"BAT: start voltage={start_volt:.2f}V, min voltage={min_volt:.2f}V")
 
     if not parts:
-        return "로그에서 요약 가능한 데이터를 찾지 못했습니다."
+        return "No summarizable data found in the log."
 
     return " | ".join(parts)
 
@@ -544,7 +544,7 @@ if uploaded_file is not None:
         else:
             st.info("No usable GPS track could be extracted from this log.")
     else:
-        st.info("🔒 이 기능은 Pro 버전 전용입니다.")
+        st.info("🔒 This feature is Pro-only.")
 
     # Error & Event analysis (Pro only)
     st.write("---")
@@ -561,7 +561,7 @@ if uploaded_file is not None:
         else:
             st.info("No ERR/EV records found in this log.")
     else:
-        st.info("🔒 이 기능은 Pro 버전 전용입니다.")
+        st.info("🔒 This feature is Pro-only.")
 
     # Battery analysis (BAT)
     if df_bat is not None and len(df_bat) > 0:
@@ -675,7 +675,7 @@ st.write("---")
 st.subheader("🤖 AI Drone Consultation Chatbot")
 
 if not st.session_state.is_pro:
-    st.info("🔒 이 기능은 Pro 버전 전용입니다.")
+    st.info("🔒 This feature is Pro-only.")
 else:
     # Initialize chat history in session state
     if "messages" not in st.session_state:
@@ -688,19 +688,20 @@ else:
         api_key = None
 
     if not api_key:
-        st.error("관리자에게 문의하세요(API 키 설정 오류)")
+        st.error("Please contact the administrator (API key configuration error).")
     else:
         # Generate log summary for context injection (if data exists)
         if "analyzed_data" in st.session_state:
             log_summary = st.session_state.analyzed_data.get("log_summary", "")
-            system_prompt = f"""너는 Ardupilot 로그 분석 전문가야. 다음은 이 비행의 핵심 데이터 요약본이야:
+            system_prompt = f"""You are a world-class Ardupilot Log Analysis Expert with 20 years of experience. Answer in English only. Be professional, concise, and helpful.
+
+Here is the concise summary of this flight:
 {log_summary}
-
-이 요약을 바탕으로 사용자의 질문에 답해줘. 로그에 직접 포함되지 않은 내용에 대해서는 일반적인 드론 운용/정비/분석 지식을 바탕으로 설명하되, 추측임을 명확히 밝혀줘."""
+Answer the user's questions based on this summary. If the question goes beyond the log, provide general drone operations/maintenance guidance and clearly state any assumptions."""
         else:
-            system_prompt = """너는 Ardupilot 로그 분석 전문가야.
+            system_prompt = """You are a world-class Ardupilot Log Analysis Expert with 20 years of experience. Answer in English only. Be professional, concise, and helpful.
 
-아직 로그 파일이 업로드되지 않았거나 처리 중이야. 일반적인 드론 로그 분석 방법, 흔한 이상 징후, 진동/배터리/GPS 해석 방법, 정비 베스트 프랙티스 등을 안내해줘."""
+No log file is available yet. Provide general guidance on log analysis, common anomalies, how to interpret vibration/battery/GPS metrics, and maintenance best practices."""
 
         # Display chat history
         for message in st.session_state.messages:
