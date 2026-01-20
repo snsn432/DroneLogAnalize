@@ -16,13 +16,25 @@ plt.rcParams['axes.unicode_minus'] = False
 # 1. Page layout & header
 st.set_page_config(page_title="Ardupilot Log Analyzer", layout="wide")
 
-# Hide Streamlit default UI elements
+# Hide Streamlit default UI elements + mobile layout tweaks
 st.markdown("""
     <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    .stDeployButton {display:none;}
-    header {visibility: hidden;}
+    #MainMenu {display: none !important;}
+    header {display: none !important;}
+    footer {display: none !important;}
+    .stDeployButton {display:none !important;}
+    [data-testid="stStatusWidget"] {display: none !important;}
+    .viewerBadge_container__1QS1n {display: none !important;}
+
+    /* Mobile spacing adjustments */
+    @media (max-width: 768px) {
+        .block-container {
+            padding-top: 0.5rem !important;
+            padding-bottom: 0.5rem !important;
+            padding-left: 0.75rem !important;
+            padding-right: 0.75rem !important;
+        }
+    }
     </style>
     """, unsafe_allow_html=True)
 
