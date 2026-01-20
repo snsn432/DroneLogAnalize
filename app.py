@@ -16,46 +16,32 @@ plt.rcParams['axes.unicode_minus'] = False
 # 1. Page layout & header
 st.set_page_config(page_title="Ardupilot Log Analyzer", layout="wide")
 
-# --- HIDE STREAMLIT STYLE ---
+# --- HIDE STREAMLIT BRANDING & MENU ---
 hide_st_style = """
 <style>
-/* 1. 상단 헤더(Header)와 햄버거 메뉴 숨기기 */
-header[data-testid="stHeader"] {
-    visibility: hidden;
-    height: 0%;
-}
-#MainMenu {
-    visibility: hidden;
-    display: none;
-}
-
-/* 2. 하단 푸터(Footer)와 'Made with Streamlit' 숨기기 */
-footer {
-    visibility: hidden;
-    display: none;
-}
-.stApp > footer {
-    display: none;
-}
-
-/* 3. 모바일 상단 툴바/프로필 사진/배포 버튼 숨기기 (가장 중요) */
-[data-testid="stToolbar"] {
-    visibility: hidden !important;
-    display: none !important;
-}
-[data-testid="stStatusWidget"] {
-    visibility: hidden !important;
-    display: none !important;
-}
-[data-testid="stDecoration"] {
-    visibility: hidden !important;
-    display: none !important;
-}
-
-/* 4. 우측 하단 뷰어 뱃지(Viewer Badge) 숨기기 */
-div[class*="viewerBadge"] {
-    display: none !important;
-}
+    /* 1. 상단 헤더 숨기기 */
+    header {visibility: hidden; display: none !important;}
+    [data-testid="stHeader"] {visibility: hidden; display: none !important;}
+    
+    /* 2. 하단 푸터 및 'Made with Streamlit' 숨기기 */
+    footer {visibility: hidden; display: none !important;}
+    
+    /* 3. 우측 하단 'Manage App' 버튼 & 툴바 숨기기 (왕관/로켓 아이콘) */
+    .stDeployButton {display: none !important;}
+    [data-testid="stToolbar"] {display: none !important;}
+    
+    /* 4. 프로필 사진 및 상태 위젯 숨기기 */
+    [data-testid="stStatusWidget"] {display: none !important;}
+    
+    /* 5. 'Created by' 뱃지 및 아바타 숨기기 (모바일 하단 오버레이) */
+    .viewerBadge_container__1QS1n {display: none !important;}
+    div[class*="viewerBadge"] {display: none !important;}
+    
+    /* 6. 햄버거 메뉴 아이콘 숨기기 */
+    #MainMenu {visibility: hidden; display: none !important;}
+    
+    /* 7. 상단 컬러 데코레이션 바 숨기기 */
+    [data-testid="stDecoration"] {display: none !important;}
 </style>
 """
 st.markdown(hide_st_style, unsafe_allow_html=True)
