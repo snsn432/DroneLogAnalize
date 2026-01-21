@@ -19,36 +19,40 @@ MAX_CONSECUTIVE_NONE = 500
 # 1. Page layout & header
 st.set_page_config(page_title="Ardupilot Log Analyzer", layout="wide")
 
-# --- HIDE STREAMLIT UI ELEMENTS ---
+# --- CUSTOM CSS: Sidebar Button Recovery ---
 hide_st_style = """
 <style>
-    /* 1. 헤더(Header) 전체 틀은 보이게 유지 (사이드바 버튼 때문) */
-    [data-testid="stHeader"] {
+    /* 1. 헤더(Header)를 숨기지 않고 배경만 투명하게 설정 (가장 중요) */
+    header[data-testid="stHeader"] {
         background: transparent !important;
+        visibility: visible !important;  /* 절대 숨기지 않음 */
     }
 
-    /* 2. 오른쪽 상단 버튼 그룹 (Fork, GitHub, 점3개) 숨기기 */
-    [data-testid="stToolbar"] {
-        visibility: hidden !important;
-    }
-    [data-testid="stHeaderActionElements"] {
-        display: none !important;
-    }
-
-    /* 3. 오른쪽 하단 뱃지/블럭 (ViewerBadge) 숨기기 */
-    div[class*="viewerBadge"] {
-        display: none !important;
-    }
-
-    /* 4. 하단 푸터 (Made with Streamlit) 숨기기 */
-    footer {
-        display: none !important;
+    /* 2. 사이드바 여는 버튼(>) 확실하게 보이게 설정 */
+    [data-testid="collapsedControl"] {
+        visibility: visible !important;
+        display: block !important;
+        color: #000000 !important; /* 검정색 */
     }
     
-    /* 5. 우측 상단 배포 버튼 숨기기 */
-    .stDeployButton {
-        display: none !important;
+    /* 혹시 모를 다른 ID 이름에도 대비 */
+    [data-testid="stSidebarCollapsedControl"] {
+        visibility: visible !important;
+        display: block !important;
+        color: #000000 !important;
     }
+
+    /* 3. 오른쪽 상단 요소들(Fork, 메뉴, Deploy)만 개별적으로 숨기기 */
+    [data-testid="stToolbar"] { display: none !important; }
+    [data-testid="stHeaderActionElements"] { display: none !important; }
+    .stDeployButton { display: none !important; }
+    
+    /* 4. 상단 무지개색 줄 숨기기 */
+    [data-testid="stDecoration"] { display: none !important; }
+
+    /* 5. 하단 푸터 & 뱃지 숨기기 */
+    footer { display: none !important; }
+    div[class*="viewerBadge"] { display: none !important; }
 </style>
 """
 st.markdown(hide_st_style, unsafe_allow_html=True)
