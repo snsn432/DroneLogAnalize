@@ -890,7 +890,7 @@ Provide comprehensive guidance on:
 - Provide actionable guidance that users can implement"""
 
         # Display chat history
-        for message in st.session_state.messages:
+        for i, message in enumerate(st.session_state.messages):
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
                 if (
@@ -907,7 +907,8 @@ Provide comprehensive guidance on:
                             label="📄 Download Report (PDF)",
                             data=pdf_data,
                             file_name="drone_report.pdf",
-                            mime="application/pdf"
+                            mime="application/pdf",
+                            key=f"pdf_download_{i}",
                         )
                     elif error_msg:
                         st.error(f"❌ PDF Creation Failed: {error_msg}")
