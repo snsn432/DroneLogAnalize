@@ -48,6 +48,11 @@ hide_st_style = """
     /* 2. 우측 하단 뱃지 숨기기 */
     .viewerBadge_container__1QS1n {display: none !important;}
     div[class*="viewerBadge"] {display: none !important;}
+
+    /* 2-1. 우측 하단 프로필/Streamlit 버튼 숨기기 */
+    [data-testid="stStatusWidget"] {display: none !important;}
+    [data-testid="stToolbar"] {display: none !important;}
+    [data-testid="stDeployButton"] {display: none !important;}
     
     /* 3. 상단 헤더는 건드리지 않음 (주석 처리) -> 화살표 나옴 */
     /* header {visibility: hidden;} */
