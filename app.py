@@ -12,6 +12,9 @@ import pydeck as pdk
 from openai import OpenAI
 from fpdf import FPDF
 
+# 🔑 [USER SETTING] Paste your OpenAI API Key here (starts with sk-...)
+MY_API_KEY = "sk-REPLACE_ME_WITH_YOUR_OPENAI_KEY"
+
 # Font settings
 plt.rcParams['font.family'] = 'Malgun Gothic'
 plt.rcParams['axes.unicode_minus'] = False
@@ -21,7 +24,20 @@ GPS_MESSAGE_TYPES = ("GPS", "GPS2", "GPS_RAW", "GPS_RAW_INT", "GPS2_RAW")
 MAX_CONSECUTIVE_NONE = 500
 
 # 1. Page layout & header
-st.set_page_config(page_title="Ardupilot Log Analyzer", layout="wide")
+st.set_page_config(page_title="ArduLogAnalyzer", layout="wide")
+
+# 1. Auto-Connect if Key is provided in secrets/code
+OPENAI_SECRET_KEY = st.secrets.get("OPENAI_API_KEY", "")
+effective_api_key = OPENAI_SECRET_KEY or MY_API_KEY
+
+if effective_api_key and effective_api_key.startswith("sk-"):
+    try:
+        if not effective_api_key.isascii():
+            st.error("OpenAI API Key에 ASCII 이외의 문자가 포함되어 있습니다.")
+        elif "openai_client" not in st.session_state:
+            st.session_state.openai_client = OpenAI(api_key=effective_api_key)
+    except Exception as e:
+        st.error(f"API Key Error: {e}")
 
 # --- CSS 복구: 사이드바 버튼 살리기 ---
 hide_st_style = """
@@ -35,12 +51,36 @@ hide_st_style = """
     
     /* 3. 상단 헤더는 건드리지 않음 (주석 처리) -> 화살표 나옴 */
     /* header {visibility: hidden;} */
+
+    /* Chat input fixed to bottom */
+    [data-testid="stChatInput"] {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: white;
+        padding: 0.5rem 1rem 0.75rem;
+        z-index: 9999;
+        box-shadow: 0 -6px 16px rgba(0, 0, 0, 0.12);
+    }
+    /* Make input narrower and centered */
+    [data-testid="stChatInput"] > div {
+        max-width: 860px;
+        margin: 0 auto;
+    }
+    /* Avoid sidebar overlap when expanded */
+    [data-testid="stSidebar"][aria-expanded="true"] ~ div [data-testid="stChatInput"] {
+        left: 21rem;
+    }
+    [data-testid="stSidebar"][aria-expanded="false"] ~ div [data-testid="stChatInput"] {
+        left: 0;
+    }
 </style>
 """
 st.markdown(hide_st_style, unsafe_allow_html=True)
 
-st.title("🚁 AI‑based Ardupilot Log Analyzer")
-st.write("Upload an Ardupilot log file (.bin) to inspect basic info and vibration data.")
+st.title("ArduLogAnalyzer")
+st.write("Upload an ArduPilot log file (.bin) to inspect basic info and vibration data.")
 
 # Pro license state
 if "is_pro" not in st.session_state:
@@ -48,6 +88,7 @@ if "is_pro" not in st.session_state:
 
 # --- Helper Functions for Auth ---
 DB_FILE = "users.json"
+AUTO_LOGIN_FILE = "auto_login.json"
 
 def load_users():
     if not os.path.exists(DB_FILE):
@@ -55,29 +96,86 @@ def load_users():
     with open(DB_FILE, "r") as f:
         return json.load(f)
 
+def _normalize_user_record(record):
+    if isinstance(record, dict):
+        return record
+    return {"password_hash": record, "pro": False}
+
+def _save_users(users):
+    with open(DB_FILE, "w") as f:
+        json.dump(users, f)
+
+def load_auto_login_user():
+    if not os.path.exists(AUTO_LOGIN_FILE):
+        return None
+    try:
+        with open(AUTO_LOGIN_FILE, "r") as f:
+            data = json.load(f)
+        return data.get("username")
+    except Exception:
+        return None
+
+def save_auto_login_user(username):
+    try:
+        with open(AUTO_LOGIN_FILE, "w") as f:
+            json.dump({"username": username}, f)
+    except Exception:
+        pass
+
+def clear_auto_login_user():
+    try:
+        if os.path.exists(AUTO_LOGIN_FILE):
+            os.remove(AUTO_LOGIN_FILE)
+    except Exception:
+        pass
+
 def save_user(username, password):
     users = load_users()
     hashed_pw = hashlib.sha256(password.encode()).hexdigest()
-    users[username] = hashed_pw
-    with open(DB_FILE, "w") as f:
-        json.dump(users, f)
+    users[username] = {"password_hash": hashed_pw, "pro": False}
+    _save_users(users)
 
 def verify_login(username, password):
     users = load_users()
     if username not in users:
         return False
     hashed_pw = hashlib.sha256(password.encode()).hexdigest()
-    return users[username] == hashed_pw
+    record = _normalize_user_record(users[username])
+    return record.get("password_hash") == hashed_pw
+
+def is_user_pro(username):
+    users = load_users()
+    if username not in users:
+        return False
+    record = _normalize_user_record(users[username])
+    return bool(record.get("pro"))
+
+def set_user_pro(username, value):
+    users = load_users()
+    if username not in users:
+        return
+    record = _normalize_user_record(users[username])
+    record["pro"] = bool(value)
+    users[username] = record
+    _save_users(users)
 
 with st.sidebar:
     # --- Sidebar Authentication UI ---
-    st.title("🚁 Drone A.I.")
+    st.title("Drone A.I.")
 
     # Initialize Session State
     if "is_logged_in" not in st.session_state:
         st.session_state["is_logged_in"] = False
     if "username" not in st.session_state:
         st.session_state["username"] = ""
+
+    # Try auto login if available
+    if not st.session_state["is_logged_in"]:
+        auto_user = load_auto_login_user()
+        if auto_user and auto_user in load_users():
+            st.session_state["is_logged_in"] = True
+            st.session_state["username"] = auto_user
+            st.session_state["is_pro"] = is_user_pro(auto_user)
 
     # If NOT logged in -> Show Login/Signup Menu
     if not st.session_state["is_logged_in"]:
@@ -87,10 +185,16 @@ with st.sidebar:
             st.subheader("Login")
             username = st.text_input("Username")
             password = st.text_input("Password", type="password")
+            auto_login_opt_in = st.checkbox("Remember me", value=True)
             if st.button("Login"):
                 if verify_login(username, password):
                     st.session_state["is_logged_in"] = True
                     st.session_state["username"] = username
+                    st.session_state["is_pro"] = is_user_pro(username)
+                    if auto_login_opt_in:
+                        save_auto_login_user(username)
+                    else:
+                        clear_auto_login_user()
                     st.success(f"Welcome back, {username}!")
                     st.rerun()
                 else:
@@ -121,52 +225,60 @@ with st.sidebar:
             st.session_state["is_logged_in"] = False
             st.session_state["username"] = ""
             st.session_state["is_pro"] = False
+            clear_auto_login_user()
             st.rerun()
         st.divider()
 
     st.header("🔑 Pro License Key")
     if st.session_state.get("is_logged_in", False):
-        # --- License Key Section with Toggle ---
-        col1, col2 = st.columns([3, 1.5])  # Arrange input and toggle nicely
+        user_is_pro = is_user_pro(st.session_state["username"])
+        st.session_state.is_pro = user_is_pro
 
-        with col1:
-            # 1. The Input Field (Standard text input)
-            license_key = st.text_input("Pro License Key", key="license_input", placeholder="Enter key here")
-
-        with col2:
-            st.write("")  # Spacer
-            st.write("")  # Spacer
-            # 2. Toggle Button
-            show_key = st.checkbox("👁️ Show", value=False)
-
-        # 3. Conditional CSS Masking
-        # Only apply the "dots" style if the user wants to HIDE the key
-        if not show_key:
-            st.markdown("""
-            <style>
-                /* Hide text in the specific input field */
-                input[aria-label="Pro License Key"] {
-                    -webkit-text-security: disc !important;
-                    text-security: disc !important;
-                    font-family: text-security-disc !important;
-                }
-            </style>
-            """, unsafe_allow_html=True)
-
-        pro_password = st.secrets.get("PRO_PASSWORD", None)
-        if license_key and pro_password and license_key == pro_password:
-            st.session_state.is_pro = True
+        if user_is_pro:
             st.success("✅ Pro features unlocked!")
         else:
-            st.session_state.is_pro = False
-            st.info("🔒 Advanced features are locked.")
-            st.link_button(
-                "🚀 Get Lifetime Access ($9)",
-                "https://scownu.gumroad.com/l/fdyrdb",
-            )
+            # --- License Key Section with Toggle ---
+            col1, col2 = st.columns([3, 1.5])  # Arrange input and toggle nicely
+
+            with col1:
+                # 1. The Input Field (Standard text input)
+                license_key = st.text_input("Pro License Key", key="license_input", placeholder="Enter key here")
+
+            with col2:
+                st.write("")  # Spacer
+                st.write("")  # Spacer
+                # 2. Toggle Button
+                show_key = st.checkbox("👁️ Show", value=False)
+
+            # 3. Conditional CSS Masking
+            # Only apply the "dots" style if the user wants to HIDE the key
+            if not show_key:
+                st.markdown("""
+                <style>
+                    /* Hide text in the specific input field */
+                    input[aria-label="Pro License Key"] {
+                        -webkit-text-security: disc !important;
+                        text-security: disc !important;
+                        font-family: text-security-disc !important;
+                    }
+                </style>
+                """, unsafe_allow_html=True)
+
+            pro_password = st.secrets.get("PRO_PASSWORD", None)
+            if license_key and pro_password and license_key == pro_password:
+                set_user_pro(st.session_state["username"], True)
+                st.session_state.is_pro = True
+                st.success("✅ Pro features unlocked!")
+            else:
+                st.info("🔒 Advanced features are locked.")
+                st.link_button(
+                    "🚀 Get Lifetime Access ($9)",
+                    "https://scownu.gumroad.com/l/fdyrdb",
+                )
     else:
         st.info("🔒 **Pro Features are locked.** Please log in to enter a license key.")
         st.session_state.is_pro = False
+
 
 def _safe_getattr(msg, *attrs):
     """Safely get attribute from message with multiple fallback names."""
@@ -304,6 +416,13 @@ def _format_duration(seconds_value):
 
 def _safe_pdf_text(text):
     return str(text).encode("latin-1", "replace").decode("latin-1")
+
+
+def _safe_unicode_text(text):
+    """Ensure text is valid UTF-8 for API payloads."""
+    if text is None:
+        return ""
+    return str(text).encode("utf-8", "ignore").decode("utf-8")
 
 
 def build_report_summary(data, uploaded_file):
@@ -797,12 +916,10 @@ if uploaded_file is not None:
     elif message_count > 0:
         st.warning("No PARM or MSG records were found. The file may still be valid, but this is less common.")
     
-    st.write("### 🔍 Flight Data Visualization")
-    tab_graphs, tab_map, tab_raw = st.tabs(
-        ["📊 Charts (Vibration/Power)", "🗺️ 3D Map", "📋 Raw Data"]
-    )
+    st.markdown("### Flight Analysis Dashboard")
+    tab_map, tab_charts, tab_chat = st.tabs(["🗺️ Map", "📊 Charts", "🤖 AI Chat"])
 
-    with tab_graphs:
+    with tab_charts:
         st.write("#### 🔋 Battery & Power")
         if df_bat is not None and len(df_bat) > 0:
             fig, ax1 = plt.subplots(figsize=(12, 5))
@@ -897,6 +1014,31 @@ if uploaded_file is not None:
         else:
             st.info("No VIBE data available for charting.")
 
+        st.write("#### 🧯 Error & Event analysis")
+        if err_messages or ev_messages:
+            rows = []
+            for msg in err_messages:
+                rows.append({
+                    "Time": "N/A",
+                    "Type": "ERR",
+                    "Message": msg,
+                    "💡 Explanation": get_error_desc("ERR", msg),
+                })
+            for msg in ev_messages:
+                rows.append({
+                    "Time": "N/A",
+                    "Type": "EV",
+                    "Message": msg,
+                    "💡 Explanation": get_error_desc("EV", msg),
+                })
+            df_errors = pd.DataFrame(rows)
+            st.dataframe(
+                df_errors[["Time", "Type", "Message", "💡 Explanation"]],
+                use_container_width=True,
+            )
+        else:
+            st.info("No ERR/EV records found in this log.")
+
     with tab_map:
         st.write("#### 🗺️ 3D Flight Path (Google Hybrid)")
 
@@ -949,138 +1091,94 @@ if uploaded_file is not None:
         else:
             st.warning("⚠️ No GPS data found in this log.")
 
-    with tab_raw:
-        st.write("#### 🧯 Error & Event analysis")
-        if err_messages or ev_messages:
-            rows = []
-            for msg in err_messages:
-                rows.append({
-                    "Time": "N/A",
-                    "Type": "ERR",
-                    "Message": msg,
-                    "💡 Explanation": get_error_desc("ERR", msg),
-                })
-            for msg in ev_messages:
-                rows.append({
-                    "Time": "N/A",
-                    "Type": "EV",
-                    "Message": msg,
-                    "💡 Explanation": get_error_desc("EV", msg),
-                })
-            df_errors = pd.DataFrame(rows)
-            st.dataframe(
-                df_errors[["Time", "Type", "Message", "💡 Explanation"]],
-                use_container_width=True,
-            )
-        else:
-            st.info("No ERR/EV records found in this log.")
-    
     # Store analyzed data in session state for chatbot access
     st.session_state.analyzed_data = data
 
-# AI Comprehensive Diagnosis (Pro only)
-st.write("---")
-st.subheader("🤖 AI Comprehensive Diagnosis")
+    with tab_chat:
+        st.subheader("🤖 GPT-5.2 Copilot")
 
-if not st.session_state.is_pro:
-    st.info("🔒 **AI Diagnosis is a Pro Feature.** Enter a license key to see the detailed AI analysis and download reports.")
-else:
-    # Initialize chat history in session state
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+        # 1. Check if Client exists in Session State
+        if "openai_client" not in st.session_state:
+            st.warning("⚠️ 코드를 열어서 'MY_API_KEY' 부분에 sk-로 시작하는 OpenAI 키를 입력해주세요!")
+        else:
+            client = st.session_state.openai_client
 
-    api_key = st.secrets.get("OPENAI_API_KEY")
-    if not api_key:
-        st.error("Please contact the administrator (API key configuration error).")
-    else:
-        detailed_stats_string = ""
-        if "analyzed_data" in st.session_state:
-            detailed_stats_string = build_detailed_stats_string(st.session_state.analyzed_data)
+            # 2. Initialize History
+            if "messages" not in st.session_state:
+                st.session_state.messages = []
 
-        # Display chat history
-        for i, message in enumerate(st.session_state.messages):
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
-                if (
-                    st.session_state.get("is_pro")
-                    and message["role"] == "assistant"
-                    and st.session_state.get("last_ai_response") == message["content"]
-                    and "analyzed_data" in st.session_state
-                ):
-                    summary = build_report_summary(st.session_state.analyzed_data, uploaded_file)
-                    analysis_result = message["content"]
-                    pdf_data, error_msg = create_pdf_report(summary, analysis_result, uploaded_file.name)
-                    if pdf_data:
+            # 3. Display History
+            for i, message in enumerate(st.session_state.messages):
+                with st.chat_message(message["role"]):
+                    st.markdown(message["content"])
+                    if message.get("pdf_data"):
                         st.download_button(
                             label="📄 Download Report (PDF)",
-                            data=pdf_data,
-                            file_name="drone_report.pdf",
+                            data=message["pdf_data"],
+                            file_name="drone_analysis_report.pdf",
                             mime="application/pdf",
-                            key=f"pdf_download_{i}",
+                            key=f"history_btn_{i}"
                         )
-                    elif error_msg:
-                        st.error(f"❌ PDF Creation Failed: {error_msg}")
 
-        # Chat input
-        if prompt := st.chat_input("Ask me about your drone log data..."):
-            # Add user message to chat history
-            st.session_state.messages.append({"role": "user", "content": prompt})
+            # 4. Chat Input & Response
+            if prompt := st.chat_input("Ask about your drone log..."):
+                
+                # Show User Message
+                st.session_state.messages.append({"role": "user", "content": prompt})
+                with st.chat_message("user"):
+                    st.markdown(prompt)
 
-            # Display user message
-            with st.chat_message("user"):
-                st.markdown(prompt)
+                # Generate AI Response
+                with st.chat_message("assistant"):
+                    with st.spinner("🧠 GPT-5.2 is thinking..."):
+                        try:
+                            log_context = "No log data."
+                            if "analyzed_data" in st.session_state:
+                                log_context = build_detailed_stats_string(st.session_state.analyzed_data)
+                            safe_context = _safe_unicode_text(log_context)
+                            messages_payload = [
+                                {"role": "system", "content": f"You are a Senior ArduPilot log analyst. The log file is already uploaded and parsed. Do not ask the user to provide the .bin file. Provide a detailed, expert-level analysis with clear technical reasoning, cite relevant metrics from the data, explain likely causes, and give prioritized actionable recommendations. Use the user's language. Analyze this data: {safe_context}"},
+                                *[
+                                    {"role": m["role"], "content": _safe_unicode_text(m["content"])}
+                                    for m in st.session_state.messages
+                                ],
+                            ]
+                            completion = client.chat.completions.create(
+                                model="gpt-5.2",
+                                messages=messages_payload,
+                            )
+                            response_text = completion.choices[0].message.content
 
-            prompt_text = f"""
-Role: You are a Senior ArduPilot Log Analysis Engineer.
-Task: Analyze the provided flight log data and answer the user's question with high technical accuracy.
+                            st.markdown(response_text)
 
-[Detailed Flight Data]
-{detailed_stats_string}
+                            # PDF & Save
+                            pdf_bytes = None
+                            create_pdf_func = globals().get("create_pdf")
+                            if create_pdf_func:
+                                pdf_bytes = create_pdf_func(response_text)
+                                st.download_button(
+                                    label="📄 Download Report (PDF)",
+                                    data=pdf_bytes,
+                                    file_name="report.pdf",
+                                    mime="application/pdf",
+                                    key=f"new_{len(st.session_state.messages)}"
+                                )
 
-[User Question]
-{prompt}
+                            msg_data = {"role": "assistant", "content": response_text}
+                            if pdf_bytes:
+                                msg_data["pdf_data"] = pdf_bytes
+                            st.session_state.messages.append(msg_data)
 
-[Instructions]
-1. **Language Rule:** ALWAYS answer in the SAME language as the [User Question].
-   - If the user asks in Korean, answer in Korean.
-   - If the user asks in English, answer in English.
-   - Do NOT mix languages unless necessary for technical terms.
-2. Analyze Vibration: If Z-vibe > 15, warn about damping.
-3. Analyze Power: Check for voltage sag (V_min < 3.3V/cell).
-4. Analyze Motor Balance: Check PWM spread.
-5. Provide actionable tuning advice based on the specific values above.
-"""
-
-            api_messages = [
-                {"role": "system", "content": "Follow the language rule in the prompt."},
-                {"role": "user", "content": prompt_text},
-            ]
-
-            # Get AI response
-            with st.chat_message("assistant"):
-                with st.spinner("Thinking..."):
-                    response = call_openai_api(api_messages, api_key)
-                    st.markdown(response)
-                st.session_state.last_ai_response = response
-
-                if response:
-                    summary = build_report_summary(st.session_state.analyzed_data, uploaded_file)
-                    pdf_data, error_msg = create_pdf_report(summary, response, uploaded_file.name)
-                    if pdf_data:
-                        st.download_button(
-                            label="📄 Download Report (PDF)",
-                            data=pdf_data,
-                            file_name="drone_report.pdf",
-                            mime="application/pdf",
-                            key="pdf_download_current",
-                        )
-                    elif error_msg:
-                        st.error(f"❌ PDF Generation Failed: {error_msg}")
-
-            # Add assistant response to chat history
-            st.session_state.messages.append({"role": "assistant", "content": response})
-        
-        # Clear chat button
-        if st.button("🗑️ Clear Chat History"):
-            st.session_state.messages = []
-            st.rerun()
+                            st.components.v1.html(
+                                """<script>
+                                    setTimeout(function(){
+                                        var v = window.parent.document.querySelector('[data-testid="stAppViewContainer"]');
+                                        if (v) v.scrollTop = v.scrollHeight;
+                                    }, 50);
+                                </script>""",
+                                height=0,
+                            )
+                        except UnicodeEncodeError as e:
+                            st.error(f"🚨 GPT Error: UTF-8 인코딩 실패 - {e}")
+                        except Exception as e:
+                            st.error(f"🚨 GPT Error: {e}")
